@@ -23,6 +23,10 @@ static struct config {
     bool     record_all_responses;
     char    *host;
     char    *script;
+    char    *clientcert;
+    char    *clientkey;
+    char    *cafile;
+    char    *capath;
     SSL_CTX *ctx;
 } cfg;
 
@@ -61,6 +65,10 @@ static void usage() {
            "    -L  --latency          Print latency statistics   \n"
            "    -U  --u_latency        Print uncorrected latency statistics\n"
            "        --timeout     <T>  Socket/request timeout     \n"
+           "        --clientcert  <C>  SSL client PEM cert chain  \n"
+           "        --clientkey   <K>  SSL client PEM key file    \n"
+           "        --cafile      <F>  SSL trusted CAs PEM file   \n"
+           "        --capath      <P>  SSL trusted CAs directory  \n"
            "    -B, --batch_latency    Measure latency of whole   \n"
            "                           batches of pipelined ops   \n"
            "                           (as opposed to each op)    \n"
@@ -89,7 +97,8 @@ int main(int argc, char **argv) {
     char *service = port ? port : schema;
 
     if (!strncmp("https", schema, 5)) {
-        if ((cfg.ctx = ssl_init()) == NULL) {
+        if ((cfg.ctx = ssl_init(cfg.clientcert, cfg.clientkey,
+                  cfg.cafile, cfg.capath)) == NULL) {
             fprintf(stderr, "unable to initialize SSL\n");
             ERR_print_errors_fp(stderr);
             exit(1);
@@ -701,6 +710,10 @@ static struct option longopts[] = {
     { "u_latency",      no_argument,       NULL, 'U' },
     { "batch_latency",  no_argument,       NULL, 'B' },
     { "timeout",        required_argument, NULL, 'T' },
+    { "clientcert",		required_argument, NULL, 'C' },
+    { "clientkey",		required_argument, NULL, 'K' },
+    { "cafile",			required_argument, NULL, 'F' },
+    { "capath",			required_argument, NULL, 'P' },
     { "help",           no_argument,       NULL, 'h' },
     { "version",        no_argument,       NULL, 'v' },
     { "rate",           required_argument, NULL, 'R' },
@@ -718,7 +731,7 @@ static int parse_args(struct config *cfg, char **url, struct http_parser_url *pa
     cfg->rate        = 0;
     cfg->record_all_responses = true;
 
-    while ((c = getopt_long(argc, argv, "t:c:d:s:H:T:R:LUBrv?", longopts, NULL)) != -1) {
+    while ((c = getopt_long(argc, argv, "t:c:d:s:H:T:C:K:F:P:R:LUBrv?", longopts, NULL)) != -1) {
         switch (c) {
             case 't':
                 if (scan_metric(optarg, &cfg->threads)) return -1;
@@ -749,6 +762,18 @@ static int parse_args(struct config *cfg, char **url, struct http_parser_url *pa
                 if (scan_time(optarg, &cfg->timeout)) return -1;
                 cfg->timeout *= 1000;
                 break;
+            case 'C':
+                cfg->clientcert = optarg;
+                break;
+            case 'K':
+                cfg->clientkey = optarg;
+                break;
+            case 'F':
+                cfg->cafile = optarg;
+                break;
+            case 'P':
+                cfg->capath = optarg;
+                break;
             case 'R':
                 if (scan_metric(optarg, &cfg->rate)) return -1;
                 break;
@@ -765,6 +790,11 @@ static int parse_args(struct config *cfg, char **url, struct http_parser_url *pa
     }
 
     if (optind == argc || !cfg->threads || !cfg->duration) return -1;
+
+    if ((!cfg->clientcert) != (!cfg->clientkey)) {
+        fprintf(stderr, "if client cert or key is given, the other must also be given\n");
+        return -1;
+    }
 
     if (!script_parse_url(argv[optind], parts)) {
         fprintf(stderr, "invalid URL: %s\n", argv[optind]);
